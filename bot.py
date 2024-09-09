@@ -4,6 +4,7 @@ import logging
 import os
 import json
 from dotenv import load_dotenv
+from tools import add_product_to_api
 
 # Constants for ConversationHandler states
 NAME, DESCRIPTION, IMAGE_URL = range(3)
@@ -172,29 +173,35 @@ async def get_product_description(update: Update, context: ContextTypes.DEFAULT_
 
 async def get_product_image_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['image_url'] = update.message.text
-    product = {
-        "id": str(len(products) + 1),
+    product_data = {
         "name": context.user_data['name'],
         "description": context.user_data['description'],
-        "image_url": context.user_data['image_url']
+        "image": context.user_data['image_url'],
+        "price": 0  # Set default price or get from user if needed
     }
-    products.append(product)
-    save_products(products)
 
-    # Post the product to the channel
-    channel_id = "-1002437698028"  # Your channel ID
-    keyboard = [[InlineKeyboardButton("Order", url=f"https://t.me/{context.bot.username}?start=order_{product['id']}")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    response = add_product_to_api(product_data)
+    print(response)
 
-    await context.bot.send_photo(
-        chat_id=channel_id,
-        photo=product["image_url"],
-        caption=f"*{product['name']}*\n{product['description']}",
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
+    if response:
+        # Assuming the API returns the product with ID
+        product_id = response.get('id')
+        channel_id = "-1002437698028"  # Your channel ID
+        keyboard = [[InlineKeyboardButton("Order", url=f"https://t.me/{context.bot.username}?start=order_{product_id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text("Product has been added and posted to the channel!")
+        await context.bot.send_photo(
+            chat_id=channel_id,
+            photo=context.user_data['image_url'],
+            caption=f"*{context.user_data['name']}*\n{context.user_data['description']}",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+
+        await update.message.reply_text("Product has been added and posted to the channel!")
+    else:
+        await update.message.reply_text("Failed to add the product to the API.")
+
     return ConversationHandler.END
 
 def main():
