@@ -66,7 +66,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Welcome to the ordering bot!")
 
-# Callback handler for when the "Proceed with Purchase" button is clicked
 async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -142,11 +141,15 @@ async def handle_confirm_order(update: Update, context: ContextTypes.DEFAULT_TYP
     orders.append(order)
     save_orders(orders)
 
+    # Delete the original message
+    await query.message.delete()
+
     # Send a confirmation message
     await query.message.reply_text(
         f"Thank you, {query.from_user.first_name}! Your order for *{product['name']}* has been confirmed.",
         parse_mode='Markdown'
     )
+
 
 
 
