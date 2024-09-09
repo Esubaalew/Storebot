@@ -28,7 +28,20 @@ def save_products(products):
 products = load_products()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Welcome to the ordering bot!")
+    # Check if this is an order start command
+    if context.args and context.args[0].startswith('order_'):
+        product_id = context.args[0].split('_')[1]
+        product = next((p for p in products if p["id"] == product_id), None)
+
+        if product:
+            await update.message.reply_text(
+                f"You have selected *{product['name']}*.\nDescription: {product['description']}\nWould you like to proceed with the purchase?",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text("Sorry, the product does not exist.")
+    else:
+        await update.message.reply_text("Welcome to the ordering bot!")
 
 # Admin command to add a new product
 async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,21 +85,6 @@ async def get_product_image_url(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("Product has been added and posted to the channel!")
     return ConversationHandler.END
 
-async def handle_start_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        product_id = context.args[0].split('_')[1]
-        product = next((p for p in products if p["id"] == product_id), None)
-
-        if product:
-            await update.message.reply_text(
-                f"You have selected *{product['name']}*.\nDescription: {product['description']}\nWould you like to proceed with the purchase?",
-                parse_mode='Markdown'
-            )
-        else:
-            await update.message.reply_text("Sorry, the product does not exist.")
-    else:
-        await update.message.reply_text("Invalid command or product ID.")
-
 def main():
     load_dotenv()
     application = Application.builder().token(os.getenv("TOKEN")).build()
@@ -105,7 +103,6 @@ def main():
     # Handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(add_product_handler)
-    application.add_handler(CommandHandler('start', handle_start_order))  # Removed pass_args
 
     application.run_polling()
 
