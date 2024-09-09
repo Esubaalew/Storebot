@@ -1,6 +1,6 @@
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CommandHandler, Application, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
+from telegram.ext import CommandHandler, Application, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes, ChatMemberHandler
 import logging
 import os
 import json
@@ -35,7 +35,15 @@ def add_order_to_api(order_data):
     except requests.RequestException as e:
         logger.error(f"Error adding order to API: {e}")
         return None
-
+    
+    
+async def is_member(update: Update, bot: Application):
+    try:
+        chat_member = await bot.get_chat_member(chat_id=f"@{os.getenv('CHANNEL_USERNAME')}", user_id=update.message.from_user.id)
+        return chat_member.status in ['member', 'administrator', 'creator']
+    except Exception as e:
+        logger.error(f"Failed to check membership: {e}")
+        return False
 # Bot command: Start order process
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args and context.args[0].startswith('order_'):
@@ -55,7 +63,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Sorry, the product does not exist.")
     else:
-        await update.message.reply_text("Welcome to the ordering bot!")
+        member_status = await is_member(update, context.bot)
+
+        if not member_status:
+            join_link = f"https://t.me/{os.getenv('CHANNEL_USERNAME')}"
+            await update.message.reply_text(
+                f"To view the available products and proceed with orders, please join our channel: [Join Now]({join_link})",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text("Welcome to the ordering bot! You can view and order products now.")
 
 # Handle the order confirmation flow
 async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
