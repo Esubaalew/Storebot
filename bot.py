@@ -1,3 +1,4 @@
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, Application, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
 import logging
@@ -13,51 +14,40 @@ NAME, DESCRIPTION, IMAGE_URL = range(3)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load products from JSON file
-def load_products():
+
+
+# Helper function to check if a product exists using the API
+def product_exists(product_id):
     try:
-        with open('products.json', 'r') as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return []
+        response = requests.get(f"{os.getenv("PRODUCT_API_URL")}{product_id}/")
+        response.raise_for_status()  # Raise an error for non-2xx responses
+        return response.json()  # Return the product data
+    except requests.RequestException as e:
+        logger.error(f"Error fetching product from API: {e}")
+        return None
 
-# Save products to JSON file
-def save_products(products):
-    with open('products.json', 'w') as file:
-        json.dump(products, file, indent=4)
-
-# Load orders from JSON file
-def load_orders():
+# Helper function to add an order to the API
+def add_order_to_api(order_data):
     try:
-        with open('orders.json', 'r') as file:
-            data = file.read().strip()
-            if data:
-                return json.loads(data)
-            return []
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+        response = requests.post(os.getenv("ORDER_API_URL"), json=order_data)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Error adding order to API: {e}")
+        return None
 
-# Save orders to JSON file
-def save_orders(orders):
-    with open('orders.json', 'w') as file:
-        json.dump(orders, file, indent=4)
-
-products = load_products()
-orders = load_orders()
-
+# Bot command: Start order process
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Check if this is an order start command
     if context.args and context.args[0].startswith('order_'):
         product_id = context.args[0].split('_')[1]
-        product = next((p for p in products if p["id"] == product_id), None)
+        product = product_exists(product_id)
 
         if product:
-            keyboard = [[InlineKeyboardButton("Proceed with Purchase", callback_data=f"order_{product['id']}")]]
+            keyboard = [[InlineKeyboardButton("Proceed with Purchase", callback_data=f"order_{product_id}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            # Display the product image and details with an inline button
             await update.message.reply_photo(
-                photo=product["image_url"],
+                photo=product["image"],
                 caption=f"*{product['name']}*\n{product['description']}",
                 parse_mode='Markdown',
                 reply_markup=reply_markup
@@ -67,15 +57,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Welcome to the ordering bot!")
 
+# Handle the order confirmation flow
 async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     product_id = query.data.split('_')[1]
-    logger.info(f"Handle Order Callback - Extracted Product ID: '{product_id}'")
-
-    product = next((p for p in products if p["id"] == product_id), None)
-    logger.info(f"Product Found: {product}")
+    product = product_exists(product_id)
 
     if not product:
         await query.edit_message_text("Sorry, the product does not exist.")
@@ -89,72 +77,44 @@ async def handle_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Would you like to confirm this order?"
     )
 
-    # Inline button for confirming the order
     keyboard = [[InlineKeyboardButton("Confirm Order", callback_data=f"confirm_order_{product_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Check if the original message contains text or an image
     if update.callback_query.message.photo:
-        # If the message contains a photo, edit the caption
-        await query.edit_message_caption(
-            caption=order_text,
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
+        await query.edit_message_caption(caption=order_text, parse_mode='Markdown', reply_markup=reply_markup)
     else:
-        # If the message contains text, edit the message text
-        await query.edit_message_text(
-            text=order_text,
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
+        await query.edit_message_text(text=order_text, parse_mode='Markdown', reply_markup=reply_markup)
 
+# Handle order confirmation
 async def handle_confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    logger.info(f"Callback Data Received: '{query.data}'")
-
-    # Split the data correctly
     parts = query.data.split('_')
     if len(parts) != 3 or parts[0] != 'confirm' or parts[1] != 'order':
         await query.message.reply_text("Invalid confirmation data.")
         return
 
     product_id = parts[2]
-    logger.info(f"Extracted Product ID: '{product_id}'")
-
-    product = next((p for p in products if p["id"] == product_id), None)
-    logger.info(f"Product Found: {product}")
+    product = product_exists(product_id)
 
     if not product:
         await query.message.reply_text("Sorry, the product does not exist.")
         return
 
-    # Save order details to orders.json
-    order = {
-        "user_id": query.from_user.id,
-        "username": query.from_user.username,
-        "product_id": product["id"],
-        "product_name": product["name"]
+    order_data = {
+
+        "product": product_id,
+        "ordered_by": query.from_user.id,
     }
 
-    orders.append(order)
-    save_orders(orders)
+    response = add_order_to_api(order_data)
 
-    # Delete the original message
-    await query.message.delete()
-
-    # Send a confirmation message
-    await query.message.reply_text(
-        f"Thank you, {query.from_user.first_name}! Your order for *{product['name']}* has been confirmed.",
-        parse_mode='Markdown'
-    )
-
-
-
-
-
+    if response:
+        await query.message.delete()
+        await query.message.reply_text(f"Thank you, {query.from_user.first_name}! Your order for *{product['name']}* has been confirmed.", parse_mode='Markdown')
+    else:
+        await query.message.reply_text("There was a problem confirming your order. Please try again later.")
 
 # Admin command to add a new product
 async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -177,16 +137,14 @@ async def get_product_image_url(update: Update, context: ContextTypes.DEFAULT_TY
         "name": context.user_data['name'],
         "description": context.user_data['description'],
         "image": context.user_data['image_url'],
-        "price": 0  # Set default price or get from user if needed
+        "price": 0  # Default price, or could ask for it
     }
 
     response = add_product_to_api(product_data)
-    print(response)
 
     if response:
-        # Assuming the API returns the product with ID
         product_id = response.get('id')
-        channel_id = "-1002437698028"  # Your channel ID
+        channel_id = "-1002437698028"  # Your Telegram channel ID
         keyboard = [[InlineKeyboardButton("Order", url=f"https://t.me/{context.bot.username}?start=order_{product_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -204,11 +162,11 @@ async def get_product_image_url(update: Update, context: ContextTypes.DEFAULT_TY
 
     return ConversationHandler.END
 
+# Main function to run the bot
 def main():
     load_dotenv()
     application = Application.builder().token(os.getenv("TOKEN")).build()
 
-    # Add product conversation handler
     add_product_handler = ConversationHandler(
         entry_points=[CommandHandler('add_product', add_product)],
         states={
@@ -219,7 +177,6 @@ def main():
         fallbacks=[]
     )
 
-    # Handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(add_product_handler)
     application.add_handler(CallbackQueryHandler(handle_order, pattern=r'^order_\d+$'))
